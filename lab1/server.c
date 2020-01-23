@@ -11,18 +11,18 @@
 
 //Server functions setup
 int setup_server(char * portNum,struct addrinfo *p);
-void handle_request()
-{
+void handle_request(int nfd,char * buf,int maxBufSize);
 
-}
 
 int main(int argc, char * argv[])
 {
+    const int maxBufSize = 65536;
     printf("Setting Up Server\n");
     struct addrinfo *p;
     struct sockaddr_storage their_addr;
     int new_fd;
     char s[INET_ADDRSTRLEN];
+    char buffer[maxBufSize];
     socklen_t  sin_size;
     
     int socket_fd = setup_server(argv[1],p);
@@ -39,10 +39,16 @@ int main(int argc, char * argv[])
         struct sockaddr_in * si = (struct sockaddr_in *)sa;
         inet_ntop(their_addr.ss_family,&(si->sin_addr),s,sizeof(s));
         printf("Server: connected to [%s]\n",s);
+
+
         if(!fork()){
+            printf("Entered Here\n");
             //need to add fucntionality for recv :D see above not implented function
             close(socket_fd);
-            if(send(new_fd,"This is stupid\n",sizeof("This is stupid\n"),0) == -1)
+            printf("Entered Here2\n");
+
+            handle_request(new_fd,buffer,maxBufSize);
+            if(send(new_fd,"stupid",strlen("stupid"),0) != -1)
             {
                 fprintf(stderr,"error sending dummy response\n");
             }
@@ -104,4 +110,24 @@ int setup_server(char * portNum,struct addrinfo *p)
         exit(1);
     }
     return socket_fd;
+}
+
+
+void handle_request(int nfd,char * buf,int maxBufSize)
+{
+    int recBytes;
+    int totalBytes = 0;
+
+    while(((recBytes = recv(nfd,buf + totalBytes,2,0)) != -1)
+    {
+        totalBytes += recBytes;
+        fprintf(stdout,"%s\n",buf);
+        printf("My count vs strlen %i =? %lu Rec Byte %i\n",totalBytes,strlen(buf),recBytes);
+        // Need to add check to see if \r\n :D
+    }
+
+    buf[totalBytes] = '\0';
+    printf("My count vs strlen %i =? %lu\n",totalBytes,strlen(buf));
+    printf("REC %sHere\n",buf);
+
 }
