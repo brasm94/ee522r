@@ -9,9 +9,16 @@
 #include <stdlib.h>
 #include <unistd.h>
 
+#include <sys/stat.h>
+
+#define MIN(X, Y) (((X) < (Y)) ? (X) : (Y))
 //Server functions setup
 int setup_server(char * portNum,struct addrinfo *p);
-void handle_request(int nfd,char * buf,int maxBufSize);
+void handle_request(int nfd,char * buf,int maxBufSize,int bufSize);
+void send_response(int nfd,char * msg);
+int handle_http(char * inMsg,char * outMsg,char * filename);
+void send_file(int nfd,char * filename);
+
 
 
 int main(int argc, char * argv[])
@@ -22,10 +29,25 @@ int main(int argc, char * argv[])
     struct sockaddr_storage their_addr;
     int new_fd;
     char s[INET_ADDRSTRLEN];
-    char buffer[maxBufSize];
+    char inBuffer[maxBufSize];
+    char outBuffer[maxBufSize];
+
     socklen_t  sin_size;
-    
+        
+    int port = 8080;
+    int bufferSize = 1024;
+    if(argc == 2)
+    {
+        port = atoi(argv[1]);
+    }
+    if(argc == 3)
+    {
+        port = atoi(argv[1]);
+        bufferSize = atoi(argv[2]);
+    }
+
     int socket_fd = setup_server(argv[1],p);
+    printf("Started Server on port:%i with BufferSize:%i\n",port,bufferSize);
 
     while(1){
         sin_size = sizeof(their_addr);
@@ -42,26 +64,25 @@ int main(int argc, char * argv[])
 
 
         if(!fork()){
-            printf("Entered Here\n");
             //need to add fucntionality for recv :D see above not implented function
+            // sleep(5);
             close(socket_fd);
-            printf("Entered Here2\n");
-
-            handle_request(new_fd,buffer,maxBufSize);
-            if(send(new_fd,"stupid",strlen("stupid"),0) != -1)
+            char filename[1024];
+            handle_request(new_fd,inBuffer,maxBufSize,bufferSize);
+            int afile = handle_http(inBuffer,outBuffer,filename);
+            printf("Filename = %s\n",filename);
+            send_response(new_fd,outBuffer);
+            if(afile == 1)
             {
-                fprintf(stderr,"error sending dummy response\n");
+                send_file(new_fd,filename);
             }
             close(new_fd);
             exit(0);
         }
         close(new_fd);
     }
-
     return 0;
 }
-
-
 int setup_server(char * portNum,struct addrinfo *p)
 {
     int status;
@@ -113,21 +134,128 @@ int setup_server(char * portNum,struct addrinfo *p)
 }
 
 
-void handle_request(int nfd,char * buf,int maxBufSize)
+void handle_request(int nfd,char * buf,int maxBufSize,int buffSize)
 {
     int recBytes;
     int totalBytes = 0;
 
-    while(((recBytes = recv(nfd,buf + totalBytes,2,0)) != -1)
+    while((recBytes = recv(nfd,buf + totalBytes,buffSize,0)) > 0)
     {
         totalBytes += recBytes;
-        fprintf(stdout,"%s\n",buf);
-        printf("My count vs strlen %i =? %lu Rec Byte %i\n",totalBytes,strlen(buf),recBytes);
+        buf[totalBytes] = '\0';
+        // printf("My count vs strlen %i =? %lu Rec Byte %i\n",totalBytes,strlen(buf),recBytes);
+        // printf("%s\n",buf);
         // Need to add check to see if \r\n :D
+        char * location = strstr(buf,"\r\n\r\n");
+        if(location){break;}
+        else
+        {
+            printf("My count vs strlen %i =? %lu Rec Byte %i\n",totalBytes,strlen(buf),recBytes);
+        }
     }
 
     buf[totalBytes] = '\0';
     printf("My count vs strlen %i =? %lu\n",totalBytes,strlen(buf));
-    printf("REC %sHere\n",buf);
+    printf("REC\n*****\n%s****\n",buf);
+}
 
+void send_response(int nfd,char * msg)
+{
+    int result = 0;
+    int totalBytes = 0;
+    while((result = send(nfd,msg,strlen(msg),0) + totalBytes) < strlen(msg))
+    {
+        fprintf(stdout,"Didn't send complete MSG :( \n");
+    }
+
+    printf("Result %i bytes Sent\n",result);
+}
+void send_file(int nfd,char * filename)
+{
+    int result = 0;
+    struct stat st;
+    
+    stat(filename, &st);
+    FILE * fpic = fopen(filename,"r");
+    char buffer[65536];
+    int byteSent = 0;
+    while(!feof(fpic))
+    { 
+        fread(buffer, 1, sizeof(buffer), fpic);
+        int totalBytes = 0;
+        while((result = send(nfd, buffer, sizeof(buffer),0)) + totalBytes < MIN(sizeof(buffer),st.st_size - byteSent))
+        {
+            totalBytes += result;
+        }
+        totalBytes += result;
+        bzero(buffer, sizeof(buffer));
+        byteSent += totalBytes;
+    }
+}
+
+
+int handle_http(char * inMsg,char * outMsg,char * filename)
+{
+    char method[1024];
+    char uri[1024];
+    char version[1024];
+    char * token = strtok(inMsg,"\r\n");
+
+    char * files_names[] = {"page.html","Wilde.jpg"};
+    sscanf(token,"%s %s %s",method,uri,version);
+    // printf("Method = [%s]\n",method);
+    // printf("URI = [%s]\n",uri);
+    // printf("Version = [%s]\n",version);
+    token = strtok(NULL,"\r\n");
+    int line = 1;
+    while(token != NULL)
+    {
+        // printf("Line %i: %s\n",line,token);
+        token = strtok(NULL,"\r\n");
+        line++;
+    }
+    int idx = -1;
+    for(int i = 0;i < 2;i++)
+    {
+        if(0 == strcmp(files_names[i],uri+1)) // +1 so doesn't compare the /
+        {
+            idx = i;
+            break;
+        }
+    }
+    //Not found return not found status lol
+    if(idx == -1)
+    {
+        char * notfound = "HTTP/1.0 404 File Not Found\r\nServer:BrianRasmussen-server\r\nConnection: close\r\n\r\n";
+        strncpy(outMsg,notfound,strlen(notfound));
+        strncpy(filename,"NO FILE NOOB\0",strlen("NO FILE NOOB\0"));
+        return -1;
+    }
+    else
+    {
+        char found[65536];
+        int n;
+        char file2open[1024];
+        strcat(file2open,"files/");
+        strcat(file2open,files_names[idx]);
+     
+        struct stat st;
+        stat(file2open, &st);
+        int filesize = st.st_size;
+
+        char * status = "HTTP/1.0 200 OK";
+        char * server = "Server:BrianRasmussen-server";
+        char * connection = "Connection: close";
+        char * contentType = "Content-Type:";
+        char * contenLen = "Content-Length:";
+
+        sprintf(found,"HTTP/1.0 200 OK\r\n");
+        sprintf(found,"%s%s\r\n",found,server);
+        sprintf(found,"%s%s\r\n",found,connection);
+        sprintf(found,"%s%s%s\r\n",found,contentType,strchr(file2open,'.')+1);
+        sprintf(found,"%s%s%li\r\n\r\n",found,contenLen,st.st_size);
+        strncpy(outMsg,found,strlen(found));
+        strncpy(filename,file2open,strlen(file2open));
+    }
+    return 1;
 }
