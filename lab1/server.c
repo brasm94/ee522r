@@ -15,6 +15,8 @@
 //Server functions setup
 int setup_server(char * portNum,struct addrinfo *p);
 void handle_request(int nfd,char * buf,int maxBufSize,int bufSize);
+// int handle_request(int nfd,char * buf,int maxBufSize,int buffSize,long int * requestPointers);
+
 void send_response(int nfd,char * msg);
 int handle_http(char * inMsg,char * outMsg,char * filename);
 void send_file(int nfd,char * filename);
@@ -63,18 +65,37 @@ int main(int argc, char * argv[])
         printf("Server: connected to [%s]\n",s);
 
 
-        if(!fork()){
+        if(!fork())
+        {
             //need to add fucntionality for recv :D see above not implented function
             // sleep(5);
             close(socket_fd);
-            char filename[1024];
+            long int offsets[64];
             handle_request(new_fd,inBuffer,maxBufSize,bufferSize);
-            int afile = handle_http(inBuffer,outBuffer,filename);
-            printf("Filename = %s\n",filename);
-            send_response(new_fd,outBuffer);
-            if(afile == 1)
+    
+            char * onerequest = strstr(inBuffer,"\r\n\r\n");
+            char * sp = inBuffer;
+            while(onerequest != NULL)
             {
-                send_file(new_fd,filename);
+                char filename[1024];
+                // strncpy(daRequest,sp);
+                // strcpy(daRequest,onerequest);
+                char daRequest[maxBufSize];
+                strncpy(daRequest,sp,onerequest + 4 - sp);
+                // strcat(onerequest,"\r\n\r\n");
+                printf("The Request = \n%s\n",daRequest);
+                int afile = handle_http(daRequest,outBuffer,filename);
+                printf("Filename = %s\n",filename);
+                send_response(new_fd,outBuffer);
+                printf("Respose = %s \nafile = %i",outBuffer,afile);
+                if(afile == 1)
+                {
+                    send_file(new_fd,filename);
+                }
+                sp = onerequest + 4;
+                // printf("Diff = %li\n",sp - inBuffer);
+                onerequest = strstr(onerequest + 4,"\r\n\r\n");
+                // bzero(filename,sizeof(filename));
             }
             close(new_fd);
             exit(0);
@@ -134,26 +155,41 @@ int setup_server(char * portNum,struct addrinfo *p)
 }
 
 
-void handle_request(int nfd,char * buf,int maxBufSize,int buffSize)
+void handle_request(int nfd,char * buf,int maxBufSize,int buffSizes)
 {
     int recBytes;
     int totalBytes = 0;
-
-    while((recBytes = recv(nfd,buf + totalBytes,buffSize,0)) > 0)
+    // int request = 0;
+    char * pBuf = buf;
+    while((recBytes = recv(nfd,buf + totalBytes,buffSizes-totalBytes,0)) > 0)
     {
         totalBytes += recBytes;
         buf[totalBytes] = '\0';
         // printf("My count vs strlen %i =? %lu Rec Byte %i\n",totalBytes,strlen(buf),recBytes);
         // printf("%s\n",buf);
         // Need to add check to see if \r\n :D
-        char * location = strstr(buf,"\r\n\r\n");
-        if(location){break;}
+        char * location = strstr(pBuf,"\r\n\r\n");
+        if(location)
+        {
+            while(location)
+            {
+                pBuf = location + 4;
+                location = strstr(pBuf,"\r\n\r\n");
+                printf("Found one @ location %li\n",pBuf - buf);
+            }
+            if((pBuf - buf) == totalBytes) // 4 bytes for \r\n\r\n if not equal there were more bytes afterwards aka parse more.
+            {
+                printf("Data Rec %li\n",(pBuf - buf) + 4);
+                printf("got to this part\n");
+                break;
+            }
+        }
         else
         {
             printf("My count vs strlen %i =? %lu Rec Byte %i\n",totalBytes,strlen(buf),recBytes);
         }
-    }
 
+    }
     buf[totalBytes] = '\0';
     printf("My count vs strlen %i =? %lu\n",totalBytes,strlen(buf));
     printf("REC\n*****\n%s****\n",buf);
@@ -163,12 +199,14 @@ void send_response(int nfd,char * msg)
 {
     int result = 0;
     int totalBytes = 0;
-    while((result = send(nfd,msg,strlen(msg),0) + totalBytes) < strlen(msg))
+    while((result = send(nfd,msg,strlen(msg) - totalBytes,0) + totalBytes) < strlen(msg))
     {
         fprintf(stdout,"Didn't send complete MSG :( \n");
+        totalBytes += result;
     }
+    totalBytes += result;
 
-    printf("Result %i bytes Sent\n",result);
+    printf("Result %i bytes Sent\n",totalBytes);
 }
 void send_file(int nfd,char * filename)
 {
@@ -181,9 +219,9 @@ void send_file(int nfd,char * filename)
     int byteSent = 0;
     while(!feof(fpic))
     { 
-        fread(buffer, 1, sizeof(buffer), fpic);
+        int bread = fread(buffer, 1, sizeof(buffer), fpic);
         int totalBytes = 0;
-        while((result = send(nfd, buffer, sizeof(buffer),0)) + totalBytes < MIN(sizeof(buffer),st.st_size - byteSent))
+        while((result = send(nfd, buffer, bread,0)) + totalBytes < MIN(sizeof(buffer),st.st_size - byteSent))
         {
             totalBytes += result;
         }
@@ -191,8 +229,8 @@ void send_file(int nfd,char * filename)
         bzero(buffer, sizeof(buffer));
         byteSent += totalBytes;
     }
+    fclose(fpic);
 }
-
 
 int handle_http(char * inMsg,char * outMsg,char * filename)
 {
@@ -203,10 +241,10 @@ int handle_http(char * inMsg,char * outMsg,char * filename)
 
     char * files_names[] = {"page.html","Wilde.jpg"};
     sscanf(token,"%s %s %s",method,uri,version);
-    // printf("Method = [%s]\n",method);
-    // printf("URI = [%s]\n",uri);
-    // printf("Version = [%s]\n",version);
-    token = strtok(NULL,"\r\n");
+    printf("Method = [%s]\n",method);
+    printf("URI = [%s]\n",uri);
+    printf("Version = [%s]\n",version);
+    token = strtok(NULL,"\r\n"); // this doesn't actually work because searches for \r or \n but ehh
     int line = 1;
     while(token != NULL)
     {
@@ -245,17 +283,32 @@ int handle_http(char * inMsg,char * outMsg,char * filename)
 
         char * status = "HTTP/1.0 200 OK";
         char * server = "Server:BrianRasmussen-server";
-        char * connection = "Connection: close";
+        // char * connection = "Connection: close";
         char * contentType = "Content-Type:";
         char * contenLen = "Content-Length:";
 
         sprintf(found,"HTTP/1.0 200 OK\r\n");
         sprintf(found,"%s%s\r\n",found,server);
-        sprintf(found,"%s%s\r\n",found,connection);
+        // sprintf(found,"%s%s\r\n",found,connection);
         sprintf(found,"%s%s%s\r\n",found,contentType,strchr(file2open,'.')+1);
         sprintf(found,"%s%s%li\r\n\r\n",found,contenLen,st.st_size);
         strncpy(outMsg,found,strlen(found));
+        printf("FILE @ OPEN = %s\n",file2open);
         strncpy(filename,file2open,strlen(file2open));
+        bzero(file2open,sizeof(file2open));
     }
     return 1;
 }
+
+// GET /page.html HTTP/1.1
+
+// GET /page.html HTTP/1.1
+
+// GET /page.html HTTP/1.1
+
+// GET /page.html HTTP/1.1
+
+// GET /page.html HTTP/1.1
+
+// GET /page.html HTTP/1.1
+
