@@ -156,14 +156,6 @@ void handle_request(int nfd,char * buf,char * oBuf,int maxBufSize,int buffSizes)
     int totalBytes = strlen(buf);
     while(1)
     {
-        sleep(2);
-        printf("One\n");
-        fflush(stdout);
-        recBytes = recv(nfd,buf + totalBytes,buffSizes-totalBytes,MSG_DONTWAIT);
-        if(recBytes == -1)// || recBytes == 0) // AKA coecket was closed by Client
-            exit(0);
-        totalBytes += recBytes;
-        // buf[totalBytes] = '\0';
         char * location = strstr(buf,"\r\n\r\n");
         if(location)
         {
@@ -175,6 +167,12 @@ void handle_request(int nfd,char * buf,char * oBuf,int maxBufSize,int buffSizes)
             printf("Remaining Buffer %s \n",buf);
             break;
         }
+        recBytes = recv(nfd,buf + totalBytes,buffSizes-totalBytes,MSG_DONTWAIT);
+        if(recBytes == -1)//|| recBytes == 0) // AKA coecket was closed by Client
+            exit(0);
+        totalBytes += recBytes;
+        // buf[totalBytes] = '\0';
+        
 
     }
     buf[totalBytes] = '\0';
